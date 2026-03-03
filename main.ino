@@ -83,7 +83,7 @@ float GetAverageAvel(int time) {
 
 void calibrate() {
   Serial.println("Calibrating, hold still...");
-  gyroOffset = GetAverageAvel(500);
+  gyroOffset = GetAverageAvel(2000);
 }
 
 
@@ -120,25 +120,49 @@ void driveStraight(float distance_check, int distance_inverse, bool reverse = fa
     inverse = ENA;
   } 
   float total_avel = 0.0;
+  float total_adis = 0.0;
   float base_speed = 200;
-  int Kp = 3;
+  int Kp = 4;
+  float inc = 0.3;
+  float total_inc = 0;
   float distance = getDistance();
+  unsigned long startTime = micros();
+  unsigned long currentTime = micros();
   
   while ((distance * distance_inverse) > (distance_check * distance_inverse)) {
+    
     float avel = GetAngularVelocity() - gyroOffset;
-    if (abs(avel) < 1) {
-      avel = 0;
+
+
+
+    if (avel > 0.05) {
+      total_inc += inc; 
+    } else if (avel < -0.05) {
+      total_inc -= inc;
     }
-    float error = Kp * avel;
+  
+
+    currentTime = micros();
+    float dt = ((currentTime - startTime) / 1000000.0);
+    startTime = currentTime;
+
+
+    float adis = avel * dt;
+    total_adis += adis;
+    float error = (Kp * total_adis) + total_inc;
+
     float change = constrain(base_speed - error, 0,255);
     float inverse_change = constrain(base_speed + error, 0 ,255);
     ledcWrite(driver, change);
     ledcWrite(inverse, inverse_change);
+    Serial.print(avel);
+    Serial.print(" ");
     Serial.print(change);
     Serial.print(" ");
     Serial.println(inverse_change);
 
     distance = getDistance();
+    
   }
   //Brake and clean up
   //The idea for the car is to complete a track, so it will have to only drive straight for a set amount of time, i will edit the trigger for drive straight to change it from time to something else later tho, if that doesnt work out i will remove the breaking system
@@ -259,7 +283,7 @@ void setup() {
   Wire.beginTransmission(0x68);
   Wire.write(0x6B);
   Wire.write(0x00);
-
+  delay(2000);
   if (Wire.endTransmission() != 0) {
     Serial.println("ERROR: MPU6050 not found! Check SDA/SCL wiring.");
   } else {
@@ -290,6 +314,5 @@ void loop() {
   driveStraight(15, 1, false);
   
 }
-
 
 
