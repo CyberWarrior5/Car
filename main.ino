@@ -176,7 +176,7 @@ void driveStraight(float distance_check, float baseSpeed = 200, int distance_inv
     // }
     float raw = getDistance();
 
-    if (raw > 2.0 && raw < 400.0 && abs(raw - distance < 7)) {
+    if (raw > 2.0 && raw < 400.0 && abs(raw - distance) < 7.0) {
       distance = raw;
     }
 
@@ -241,70 +241,85 @@ void driveStraight(float distance_check, float baseSpeed = 200, int distance_inv
 
 }
 
-
-void turn(int degrees) {
-  int driver;
-  int inverse;
-  int INX;
-  int INY;
-  int INA;
-  int INB;
-
-  if (degrees > 0) {
-    driver  = ENB;
-    inverse = ENA;
-    INX = IN3;
-    INY = IN4;
-    INA = IN1;
-    INB = IN2;
-  } else {
-    driver  = ENA;
-    inverse = ENB;
-    INX = IN1;
-    INY = IN2;
-    INA = IN3;
-    INB = IN4;
+void StartTurning(int speed, int degrees) {
+  if (degrees > 0) { // Right turn
+    digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW); // Left Forward
+    digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH); // Right Backward
+  } else { // Left turn
+    digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH); // Left Backward
+    digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); // Right Forward
   }
+  ledcWrite(ENA, speed);
+  ledcWrite(ENB, speed);
+}
 
-  digitalWrite(INA, HIGH);
-  digitalWrite(INB, HIGH);
 
-  digitalWrite(INX, LOW);
-  digitalWrite(INY, HIGH);
+void turn(int degrees, float baseSpeed = 200) {
+  calibrate();
 
-  ledcWrite(driver, 0);
-  ledcWrite(inverse, 255);
+  int driver = ENA;
+  int inverse = ENB;
+  int INX = IN1;
+  int INY = IN2;
+  int INA = IN3;
+  int INB = IN4;
 
+
+
+  float deadzone = 0.15;
   float total_adis = 0;
-  float current_speed;
-  float base_speed = 150;
-  float Kp = 2;
-  float averageAvel;
+  float Kp = 3;
+  float Ki = 10;
+  float integral = 0;
+  float decel = 0;
 
-  unsigned long startTime = millis();
-  unsigned long startTime2 = millis();
 
-  while ((abs(degrees - total_adis ) > 0.3 || abs(averageAvel) > 0.1) && millis() - startTime < 2000) {
+  StartTurning(baseSpeed, degrees);
+
+  bool passed = false;
+
+  unsigned long currentTime = micros();
+  unsigned long startTime = micros();
+  while (true) {
+    float avel = GetAngularVelocity() - gyroOffset;
+
+    if (abs(avel) < deadzone) {
+      avel = 0;
+    }
+
+    currentTime = micros();
+    float dt = ((currentTime - startTime) / 1000000.0);
     
-    averageAvel = GetAverageAvel(10) - gyroOffset;
-    float adis = averageAvel * ((millis() - startTime2) / 1000.0);
+
+    float adis = avel * dt;
     total_adis += adis;
 
-    float error = abs(degrees - total_adis);
-    current_speed = constrain((error * Kp) + base_speed, 0, 255);
+    float current_error = degrees - total_adis; 
+    integral += (Ki * abs(current_error) * dt);
+    integral = constrain(integral, -50.0, 50.0);
 
-    if (abs(total_adis) < abs(degrees)) {
-      digitalWrite(INX, LOW);
-      digitalWrite(INY, HIGH);
-      ledcWrite(driver, current_speed);
-    } else {
-      digitalWrite(INX, HIGH);
-      digitalWrite(INY, LOW);
-      ledcWrite(driver, current_speed);
+    float change = (abs(current_error) * Kp) + integral - decel;
+    change = constrain(change, 160, baseSpeed);
+
+    if (current_error > 0.5) {
+      digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+      digitalWrite(IN3, LOW);  digitalWrite(IN4, HIGH); 
+    } else if (current_error < -0.5) {
+      digitalWrite(IN1, LOW);  digitalWrite(IN2, HIGH); 
+      digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW); 
     }
-    startTime2 = millis();
+      ledcWrite(ENA, change);
+      ledcWrite(ENB, change);
 
+    if (abs(total_adis - degrees) < 0.3) {
+      decel += 3;
+    }
+    if (abs(total_adis - degrees) < 0.3 && abs(avel) < 1) {
+      break;
+    } 
+    startTime = currentTime;
   }
+  digitalWrite(LED, LOW);
   digitalWrite(IN1, HIGH);
   digitalWrite(IN2, HIGH);
   digitalWrite(IN3, HIGH);
@@ -366,7 +381,7 @@ void setup() {
 
 
 void loop() {
-  driveStraight(25, 200, 1, false, true);
+  turn(90, 200);
   while (true) {
     delay(1000);
   }
