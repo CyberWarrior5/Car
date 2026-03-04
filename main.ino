@@ -1,4 +1,5 @@
 #include <Wire.h>
+#include <algorithm>
 
 int LED = 2;
 int IN1 = 12;
@@ -103,9 +104,8 @@ void StartDriving(int speed, bool reverse = false) {
   }
 }
 
-void driveStraight(float distance_check, int distance_inverse, bool reverse = false, bool max = false) {
-
-  
+void driveStraight(float distance_check, float baseSpeed = 200, int distance_inverse = 1, bool reverse = false, bool max = false) {
+  float slowdown = distance_check + (20 * distance_inverse);
   int driver = ENA;
   int inverse = ENB;
   if (reverse) {
@@ -114,52 +114,48 @@ void driveStraight(float distance_check, int distance_inverse, bool reverse = fa
   } 
   float total_avel = 0.0;
   float total_adis = 0.0;
-  float base_speed = 200;
-  int Kp = 10;
+  int Kp = 13;
+  float Ki = 15;
+  float integral = 0;
   float distance = getDistance();
   unsigned long startTime = micros();
   unsigned long currentTime = micros();
   unsigned long stopTimer = micros();
-  float deadzone = 0.5;
+  float deadzone = 0.15;
+  float Kd = 2;
   if (max) {
-    Kp = 10;
-    base_speed = 255;
-    deadzone = 0.5;
-    digitalWrite(LED, HIGH);
-    delay(50);
-    digitalWrite(LED, LOW);
+    Kp = 13;
+    Kd = 0.5;
+    baseSpeed = 250;
   }
-  StartDriving(base_speed, reverse);
-  
-  while ((distance * distance_inverse) > (distance_check * distance_inverse)) {
-    
+  StartDriving(baseSpeed, reverse);
+  float speed = baseSpeed - 100;
+  bool passed = false;
+  float increments = 0;
+  while (true) {
+    speed = constrain(speed + 3, 0, baseSpeed);
     float avel = GetAngularVelocity() - gyroOffset;
- 
     if (abs(avel) < deadzone) {
       avel = 0;
     }
-    Serial.println(avel);
+    
     currentTime = micros();
     float dt = ((currentTime - startTime) / 1000000.0);
     startTime = currentTime;
-
+    
 
     float adis = avel * dt;
     total_adis += adis;
-    float error = (Kp * total_adis);
+    integral += (Ki * total_adis * dt);
+    integral = constrain(integral, -50.0, 50.0);
+    float error = (Kp * total_adis) + integral + (Kd * avel);
 
-    float change = constrain(base_speed - error, 0,255);
-    float inverse_change = constrain(base_speed + error , 0 ,255);
+    float change = constrain(speed - error, 0,255);
+    float inverse_change = constrain(speed + error , 0 ,255);
     ledcWrite(driver, change);
     ledcWrite(inverse, inverse_change);
-    Serial.print(avel);
-    Serial.print(" ");
-    Serial.print(change);
-    Serial.print(" ");
-    Serial.println(inverse_change);
 
-    distance = getDistance();
-
+    
     // if (micros() - stopTimer > 3000000) {
 
     //   total_adis = 0;
@@ -173,12 +169,57 @@ void driveStraight(float distance_check, int distance_inverse, bool reverse = fa
     //   stopTimer = micros();
     //   startTime = micros();
 
-    //   ledcWrite(driver, base_speed);
-    //   ledcWrite(inverse, base_speed);
+    //   ledcWrite(driver, baseSpeed);
+    //   ledcWrite(inverse, baseSpeed);
 
 
     // }
-    
+    float raw = getDistance();
+
+    if (raw > 2.0 && raw < 400.0 && abs(raw - distance < 7)) {
+      distance = raw;
+    }
+
+  
+    if (!((distance * distance_inverse) > (slowdown * distance_inverse))) {
+      if (!passed) {
+        int pass = 0;
+        for (int i = 0; i < 3; i++) {
+          delay(2);
+          float tdist = getDistance();
+          if (!((tdist * distance_inverse) > (slowdown * distance_inverse))) {
+            pass += 1;
+          }
+        }
+        if (pass >= 3) {
+          passed = true;
+          baseSpeed = speed;
+          increments = baseSpeed / 100;
+          Serial.println("Slowdown started");
+          digitalWrite(LED, HIGH);
+        }
+      }
+    }
+      
+    if (passed) {
+      baseSpeed = constrain(baseSpeed - increments, 180, 255);
+    }
+      
+    if (!((distance * distance_inverse) > (distance_check * distance_inverse))) {
+      int pass = 0;
+      for (int i = 0; i < 3; i++) {
+        delay(2);
+        float tdist = getDistance();
+        if (!((tdist * distance_inverse) > (distance_check * distance_inverse))) {
+          pass += 1;
+        }
+      }
+      if (pass >= 3) {
+        Serial.println("Stopping...");
+        digitalWrite(LED, LOW);
+        break;
+      }
+    }
   }
   //Brake and clean up
   //The idea for the car is to complete a track, so it will have to only drive straight for a set amount of time, i will edit the trigger for drive straight to change it from time to something else later tho, if that doesnt work out i will remove the breaking system
@@ -325,8 +366,10 @@ void setup() {
 
 
 void loop() {
-  driveStraight(15, 1, false, false);
-  
+  driveStraight(25, 200, 1, false, true);
+  while (true) {
+    delay(1000);
+  }
 }
 
 
