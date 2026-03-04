@@ -58,35 +58,27 @@ float GetAngularVelocity() {
   }
 }
 
-float GetAverageAvel(int time) {
-  unsigned long startTime = millis();
+float GetAverageAvel(unsigned long time) {
+  unsigned long startTime = micros();
 
   float total = 0;
-  int counter = 0;
+  long counter = 0;
 
-  while (millis() - startTime < time) {
-    float avel = GetAngularVelocity();
-    total += avel;
+  while (micros() - startTime < time) { 
+    total += GetAngularVelocity();
     counter += 1;
-    delay(1);
   }
 
-  if (counter == 0) {
-    Serial.println("Counter is 0");
-    return 0;
-  }
-
-  float average_avel = total / counter;
-  return average_avel;
+  if (counter > 0) {
+    return total / float(counter);
+  } 
+  return 0;
   
 }
 
 void calibrate() {
-  Serial.println("Calibrating, hold still...");
-  gyroOffset = GetAverageAvel(2000);
+  gyroOffset = GetAverageAvel(3000000);
 }
-
-
 
 void StartDriving(int speed, bool reverse = false) { 
 
@@ -111,8 +103,9 @@ void StartDriving(int speed, bool reverse = false) {
   }
 }
 
-void driveStraight(float distance_check, int distance_inverse, bool reverse = false) {
-  StartDriving(200, false);
+void driveStraight(float distance_check, int distance_inverse, bool reverse = false, bool max = false) {
+
+  
   int driver = ENA;
   int inverse = ENB;
   if (reverse) {
@@ -122,26 +115,30 @@ void driveStraight(float distance_check, int distance_inverse, bool reverse = fa
   float total_avel = 0.0;
   float total_adis = 0.0;
   float base_speed = 200;
-  int Kp = 4;
-  float inc = 0.3;
-  float total_inc = 0;
+  int Kp = 10;
   float distance = getDistance();
   unsigned long startTime = micros();
   unsigned long currentTime = micros();
+  unsigned long stopTimer = micros();
+  float deadzone = 0.5;
+  if (max) {
+    Kp = 10;
+    base_speed = 255;
+    deadzone = 0.5;
+    digitalWrite(LED, HIGH);
+    delay(50);
+    digitalWrite(LED, LOW);
+  }
+  StartDriving(base_speed, reverse);
   
   while ((distance * distance_inverse) > (distance_check * distance_inverse)) {
     
     float avel = GetAngularVelocity() - gyroOffset;
-
-
-
-    if (avel > 0.05) {
-      total_inc += inc; 
-    } else if (avel < -0.05) {
-      total_inc -= inc;
+ 
+    if (abs(avel) < deadzone) {
+      avel = 0;
     }
-  
-
+    Serial.println(avel);
     currentTime = micros();
     float dt = ((currentTime - startTime) / 1000000.0);
     startTime = currentTime;
@@ -149,10 +146,10 @@ void driveStraight(float distance_check, int distance_inverse, bool reverse = fa
 
     float adis = avel * dt;
     total_adis += adis;
-    float error = (Kp * total_adis) + total_inc;
+    float error = (Kp * total_adis);
 
     float change = constrain(base_speed - error, 0,255);
-    float inverse_change = constrain(base_speed + error, 0 ,255);
+    float inverse_change = constrain(base_speed + error , 0 ,255);
     ledcWrite(driver, change);
     ledcWrite(inverse, inverse_change);
     Serial.print(avel);
@@ -162,6 +159,25 @@ void driveStraight(float distance_check, int distance_inverse, bool reverse = fa
     Serial.println(inverse_change);
 
     distance = getDistance();
+
+    // if (micros() - stopTimer > 3000000) {
+
+    //   total_adis = 0;
+    //   total_inc = 0;
+    //   ledcWrite(ENA, 0);
+    //   ledcWrite(ENB, 0);
+
+    //   delay(500);
+
+    //   calibrate();
+    //   stopTimer = micros();
+    //   startTime = micros();
+
+    //   ledcWrite(driver, base_speed);
+    //   ledcWrite(inverse, base_speed);
+
+
+    // }
     
   }
   //Brake and clean up
@@ -287,9 +303,7 @@ void setup() {
   if (Wire.endTransmission() != 0) {
     Serial.println("ERROR: MPU6050 not found! Check SDA/SCL wiring.");
   } else {
-    Serial.println("MPU6050 Found. Starting Calibration...");
     calibrate();
-    Serial.println("Calibration Successful.");
   }
 
   pinMode(IN1, OUTPUT);
@@ -311,7 +325,7 @@ void setup() {
 
 
 void loop() {
-  driveStraight(15, 1, false);
+  driveStraight(15, 1, false, false);
   
 }
 
