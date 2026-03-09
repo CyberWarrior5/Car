@@ -78,7 +78,7 @@ float GetAverageAvel(unsigned long time) {
 }
 
 void calibrate() {
-  gyroOffset = GetAverageAvel(3000000);
+  gyroOffset = GetAverageAvel(1000000);
 }
 
 void StartDriving(int speed, bool reverse = false) { 
@@ -104,8 +104,8 @@ void StartDriving(int speed, bool reverse = false) {
   }
 }
 
-void driveStraight(float distance_check, float baseSpeed = 200, int distance_inverse = 1, bool reverse = false, bool max = false) {
-  float slowdown = distance_check + (20 * distance_inverse);
+float driveStraight(float distance_check, float baseSpeed = 200, int distance_inverse = 1, bool reverse = false, int slowdownnum = 20) {
+  float slowdown = distance_check + (slowdownnum * distance_inverse);
   int driver = ENA;
   int inverse = ENB;
   if (reverse) {
@@ -114,20 +114,16 @@ void driveStraight(float distance_check, float baseSpeed = 200, int distance_inv
   } 
   float total_avel = 0.0;
   float total_adis = 0.0;
-  int Kp = 13;
-  float Ki = 15;
+  int Kp = 10;
+  float Ki = 20;
   float integral = 0;
   float distance = getDistance();
   unsigned long startTime = micros();
   unsigned long currentTime = micros();
   unsigned long stopTimer = micros();
-  float deadzone = 0.15;
-  float Kd = 2;
-  if (max) {
-    Kp = 13;
-    Kd = 0.5;
-    baseSpeed = 250;
-  }
+  float deadzone = 0.1;
+  float Kd = 1;
+
   StartDriving(baseSpeed, reverse);
   float speed = baseSpeed - 100;
   bool passed = false;
@@ -174,9 +170,9 @@ void driveStraight(float distance_check, float baseSpeed = 200, int distance_inv
 
 
     // }
-    float raw = getDistance();
+    float raw = 100;
 
-    if (raw > 2.0 && raw < 400.0 && abs(raw - distance) < 7.0) {
+    if (raw > 2.0 && raw < 400.0) {
       distance = raw;
     }
 
@@ -238,7 +234,7 @@ void driveStraight(float distance_check, float baseSpeed = 200, int distance_inv
   digitalWrite(IN4, LOW);
   ledcWrite(ENA, 0);
   ledcWrite(ENB, 0);
-
+  return total_adis;
 }
 
 void StartTurning(int speed, int degrees) {
@@ -255,8 +251,6 @@ void StartTurning(int speed, int degrees) {
 
 
 void turn(int degrees, float baseSpeed = 200) {
-  calibrate();
-
   int driver = ENA;
   int inverse = ENB;
   int INX = IN1;
@@ -268,8 +262,8 @@ void turn(int degrees, float baseSpeed = 200) {
 
   float deadzone = 0.15;
   float total_adis = 0;
-  float Kp = 3;
-  float Ki = 10;
+  float Kp = 2;
+  float Ki = 30;
   float integral = 0;
   float decel = 0;
 
@@ -296,9 +290,9 @@ void turn(int degrees, float baseSpeed = 200) {
 
     float current_error = degrees - total_adis; 
     integral += (Ki * abs(current_error) * dt);
-    integral = constrain(integral, -50.0, 50.0);
+    integral = constrain(integral, -45, 45);
 
-    float change = (abs(current_error) * Kp) + integral - decel;
+    float change = (abs(current_error) * Kp) + integral;
     change = constrain(change, 160, baseSpeed);
 
     if (current_error > 0.5) {
@@ -311,10 +305,8 @@ void turn(int degrees, float baseSpeed = 200) {
       ledcWrite(ENA, change);
       ledcWrite(ENB, change);
 
-    if (abs(total_adis - degrees) < 0.3) {
-      decel += 3;
-    }
-    if (abs(total_adis - degrees) < 0.3 && abs(avel) < 1) {
+
+    if (abs(total_adis - degrees) < 1 && abs(avel) < 6) {
       break;
     } 
     startTime = currentTime;
@@ -339,13 +331,37 @@ void turn(int degrees, float baseSpeed = 200) {
   ledcWrite(ENB, 0);
 }
 
+float getDistanceSafe() {
+  float distance = 0;
+  int pass = 0;
+  while (true) {
+    pass = 0;
+    distance = getDistance();
+    for (int i = 0; i < 10; i++) {
+      delay(2);
+      float tdist = getDistance();
+      if (abs(distance - tdist) < 0.5) {
+        pass += 1;
+      }
+    }
+    if (pass == 10) {
+      break;
+    }
+  }
+  return distance;
+}
 
 
-void parralel_park() {
-  servo(180);
-  delay(200);
-  driveStraight(15, 1, false);
-  turn(-90);
+void parralel_park(int side) {
+  //Identify space
+  side = constrain(side, -1, 1);
+  servo(90 + (90 * side));
+  delay(500);
+  float currentDistance = getDistanceSafe();
+  driveStraight(currentDistance + 3, 200, -1, false, 0);
+  delay(1000);
+  turn(180, 190);
+
 }
 
 void setup() {
@@ -381,8 +397,13 @@ void setup() {
 
 
 void loop() {
-  turn(90, 200);
+  // parralel_park(1);
+  float total_adis = driveStraight(30, 250, 1, false, 20);
+  delay(1000);
+  float new_adis = driveStraight(10, 250, 1, true, 0);
+
   while (true) {
+    Serial.println(total_adis);
     delay(1000);
   }
 }
